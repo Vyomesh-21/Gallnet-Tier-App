@@ -62,7 +62,10 @@ cors_kwargs: Dict[str, Any] = {
     "allow_headers": ["*"],
 }
 
-origin_regex = os.getenv("FRONTEND_ORIGIN_REGEX")
+origin_regex = os.getenv(
+    "FRONTEND_ORIGIN_REGEX",
+    r"https://.*\.onrender\.com|https://.*\.vercel\.app"
+)
 if origin_regex:
     cors_kwargs["allow_origin_regex"] = origin_regex
 
