@@ -1,0 +1,26 @@
+# Version control
+.git/
+.gitignore
+
+# Cache and temporary files
+.cache/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Frontend source (built and hosted independently on Vercel)
+frontend/
+components/
+
+# Datasets, evaluations, logs & scratch workspaces
+original_dataset/
+external_validation/
+reports/
+scratch/
+*.log
+*.ipynb
+
+# Windows setup and launch scripts
+*.bat

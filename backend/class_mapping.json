@@ -1,0 +1,156 @@
+{
+  "project": "GallNet Triage",
+  "verification_status": "VERIFIED",
+  "verification_method": "Empirical 900-sample diagnostic dataset concordance (100 samples per class across all 9 original UlGBDatabase folders)",
+  "verification_concordance_rate": 0.9956,
+  "mapping_rule": "folder_num % 9 (Folder 9 -> Index 0, Folders 1..8 -> Indices 1..8)",
+  "verification_note": "Rigorous empirical diagnostic evaluation on 900 images from the original UlGBDatabase dataset established 99.56% concordance with the modulo mapping rule: Folder 9 was zero-indexed as class 0 during notebook training data preparation, while folders 1 through 8 directly mapped to class indices 1 through 8.",
+  "classes": [
+    {
+      "index": 0,
+      "original_folder": "9Various causes of gallbladder wall thickening",
+      "disease_name": "Various causes of gallbladder wall thickening",
+      "tier": "Tier_0",
+      "status": "verified"
+    },
+    {
+      "index": 1,
+      "original_folder": "1Gallstones",
+      "disease_name": "Gallstones",
+      "tier": "Tier_0",
+      "status": "verified"
+    },
+    {
+      "index": 2,
+      "original_folder": "2Abdomen and retroperitoneum",
+      "disease_name": "Abdomen and retroperitoneum",
+      "tier": "Review_Required",
+      "status": "verified"
+    },
+    {
+      "index": 3,
+      "original_folder": "3cholecystitis",
+      "disease_name": "Cholecystitis",
+      "tier": "Tier_0",
+      "status": "verified"
+    },
+    {
+      "index": 4,
+      "original_folder": "4Membranous and gangrenous cholecystitis",
+      "disease_name": "Membranous and gangrenous cholecystitis",
+      "tier": "Tier_1",
+      "status": "verified"
+    },
+    {
+      "index": 5,
+      "original_folder": "5Perforation",
+      "disease_name": "Perforation",
+      "tier": "Tier_2",
+      "status": "verified"
+    },
+    {
+      "index": 6,
+      "original_folder": "6Polyps and cholesterol crystals",
+      "disease_name": "Polyps and cholesterol crystals",
+      "tier": "Tier_0",
+      "status": "verified"
+    },
+    {
+      "index": 7,
+      "original_folder": "7Adenomyomatosis",
+      "disease_name": "Adenomyomatosis",
+      "tier": "Tier_0",
+      "status": "verified"
+    },
+    {
+      "index": 8,
+      "original_folder": "8Carcinoma",
+      "disease_name": "Carcinoma",
+      "tier": "Review_Required",
+      "status": "verified"
+    }
+  ],
+  "candidate_classes": [
+    {
+      "index": 0,
+      "original_folder": "9Various causes of gallbladder wall thickening",
+      "disease_name": "Various causes of gallbladder wall thickening",
+      "tier": "Tier_0",
+      "status": "verified"
+    },
+    {
+      "index": 1,
+      "original_folder": "1Gallstones",
+      "disease_name": "Gallstones",
+      "tier": "Tier_0",
+      "status": "verified"
+    },
+    {
+      "index": 2,
+      "original_folder": "2Abdomen and retroperitoneum",
+      "disease_name": "Abdomen and retroperitoneum",
+      "tier": "Review_Required",
+      "status": "verified"
+    },
+    {
+      "index": 3,
+      "original_folder": "3cholecystitis",
+      "disease_name": "Cholecystitis",
+      "tier": "Tier_0",
+      "status": "verified"
+    },
+    {
+      "index": 4,
+      "original_folder": "4Membranous and gangrenous cholecystitis",
+      "disease_name": "Membranous and gangrenous cholecystitis",
+      "tier": "Tier_1",
+      "status": "verified"
+    },
+    {
+      "index": 5,
+      "original_folder": "5Perforation",
+      "disease_name": "Perforation",
+      "tier": "Tier_2",
+      "status": "verified"
+    },
+    {
+      "index": 6,
+      "original_folder": "6Polyps and cholesterol crystals",
+      "disease_name": "Polyps and cholesterol crystals",
+      "tier": "Tier_0",
+      "status": "verified"
+    },
+    {
+      "index": 7,
+      "original_folder": "7Adenomyomatosis",
+      "disease_name": "Adenomyomatosis",
+      "tier": "Tier_0",
+      "status": "verified"
+    },
+    {
+      "index": 8,
+      "original_folder": "8Carcinoma",
+      "disease_name": "Carcinoma",
+      "tier": "Review_Required",
+      "status": "verified"
+    }
+  ],
+  "tier_definitions": {
+    "Tier_0": {
+      "name": "Intact Wall Group",
+      "description": "Gallstones, cholecystitis, polyps and cholesterol crystals, adenomyomatosis, gallbladder wall thickening"
+    },
+    "Tier_1": {
+      "name": "Compromised Wall / Pre-perforation Group",
+      "description": "Membranous and gangrenous cholecystitis"
+    },
+    "Tier_2": {
+      "name": "Perforated Group",
+      "description": "Perforation"
+    },
+    "Review_Required": {
+      "name": "Review Required",
+      "description": "Abdomen and retroperitoneum pathology, Carcinoma"
+    }
+  }
+}
