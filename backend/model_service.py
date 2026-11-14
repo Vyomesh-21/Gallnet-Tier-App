@@ -48,6 +48,8 @@ EXPECTED_OUTPUT_CLASSES = 9
 class ModelService:
     def __init__(self):
         self.model = None
+        self.feature_extractor = None
+        self.classifier_model = None
         self.grad_model = None
         self.last_conv_layer_name = "conv2d_11"
         self.error: Optional[str] = None
@@ -133,19 +135,24 @@ class ModelService:
             if out_dim != EXPECTED_OUTPUT_CLASSES:
                 raise ValueError(f"Expected 9 output classes, got: {out_shape}")
 
-            # Verify last convolutional layer exists for Grad-CAM
+            # Verify last convolutional layer exists for memory-efficient 2-stage Grad-CAM
             try:
                 last_conv = self.model.get_layer(self.last_conv_layer_name)
-                # Build Grad-CAM multi-output model
-                model_out = self.model.output[0] if isinstance(self.model.output, list) else self.model.output
-                self.grad_model = tf.keras.models.Model(
+                self.feature_extractor = tf.keras.models.Model(
                     inputs=self.model.inputs,
-                    outputs=[last_conv.output, model_out]
+                    outputs=last_conv.output
                 )
-                logger.info("Grad-CAM model initialized using layer '%s' (output shape: %s).",
-                            self.last_conv_layer_name, last_conv.output.shape)
+                classifier_in = tf.keras.Input(shape=last_conv.output.shape[1:])
+                x = classifier_in
+                for layer_name in ['batch_normalization_11', 'global_average_pooling2d', 'dense_6', 'dense_7', 'dense_8']:
+                    x = self.model.get_layer(layer_name)(x)
+                self.classifier_model = tf.keras.models.Model(inputs=classifier_in, outputs=x)
+                self.grad_model = self.classifier_model
+                logger.info("2-stage memory-efficient Grad-CAM initialized successfully.")
             except Exception as grad_exc:
                 logger.warning("Grad-CAM initialization warning: %s. Explainability will be unavailable.", grad_exc)
+                self.feature_extractor = None
+                self.classifier_model = None
                 self.grad_model = None
 
             # Test a dry-run inference using direct callable (no Keras predict cache overhead)
@@ -202,29 +209,27 @@ class ModelService:
         batch_bgr = np.expand_dims(normalized_bgr, axis=0)
         return batch_bgr, rgb_128, orig_width, orig_height
 
-    def compute_gradcam(self, batch_tensor: np.ndarray, target_class_idx: int) -> Optional[np.ndarray]:
+    def compute_gradcam(self, conv_feat: Any, target_class_idx: int) -> Optional[np.ndarray]:
         """
-        Computes Grad-CAM heatmap for the target class on layer conv2d_11.
-        Returns a normalized 2D float array of shape (128, 128) in [0, 1], or None if unavailable.
+        Computes Grad-CAM heatmap by tracing ONLY the 5 classifier layers (zero convolution memory overhead).
         """
-        if self.grad_model is None:
+        if self.classifier_model is None:
             return None
 
         try:
             import tensorflow as tf
-            tensor = tf.convert_to_tensor(batch_tensor, dtype=tf.float32)
-
             with tf.GradientTape() as tape:
-                conv_outputs, predictions = self.grad_model(tensor, training=False)
-                loss = predictions[0, target_class_idx]
+                tape.watch(conv_feat)
+                preds = self.classifier_model(conv_feat, training=False)
+                loss = preds[0, target_class_idx]
 
-            grads = tape.gradient(loss, conv_outputs)
+            grads = tape.gradient(loss, conv_feat)
             if grads is None:
-                del tensor, tape, conv_outputs, predictions
+                del tape, preds
                 return None
 
             pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
-            cam = tf.reduce_sum(tf.multiply(pooled_grads, conv_outputs[0]), axis=-1)
+            cam = tf.reduce_sum(tf.multiply(pooled_grads, conv_feat[0]), axis=-1)
             cam_np = np.maximum(cam.numpy(), 0.0)
 
             max_val = np.max(cam_np)
@@ -233,7 +238,7 @@ class ModelService:
             else:
                 cam_np = np.zeros_like(cam_np)
 
-            del tensor, tape, conv_outputs, predictions, grads, pooled_grads, cam
+            del tape, preds, grads, pooled_grads, cam
 
             # Resize 64x64 CAM to 128x128
             cam_pil = Image.fromarray((cam_np * 255).astype(np.uint8)).resize(
@@ -281,24 +286,46 @@ class ModelService:
         # 1. Preprocess exactly as in training
         batch_bgr, rgb_128, orig_w, orig_h = self.preprocess_image(image_bytes)
 
-        # 2. REAL model prediction - direct tensor evaluation avoids Keras predict() memory caching
+        # 2. REAL model prediction & lightweight Grad-CAM
         import tensorflow as tf
         tensor = tf.convert_to_tensor(batch_bgr, dtype=tf.float32)
-        raw_scores = self.model(tensor, training=False).numpy()[0]
-        scores = np.asarray(raw_scores, dtype=np.float64)
-        del tensor
 
-        # 3. Three-Tier Aggregation
-        triage_result = aggregate_triage(
-            probabilities=scores,
-            labels=self.labels,
-            mapping_verified=self.mapping_verified
-        )
+        cam_128 = None
+        if self.feature_extractor is not None and self.classifier_model is not None:
+            # Stage 1: Feature extraction without GradientTape (ultra-low RAM)
+            conv_feat = self.feature_extractor(tensor, training=False)
+            preds = self.classifier_model(conv_feat, training=False)
+            raw_scores = preds.numpy()[0]
+            scores = np.asarray(raw_scores, dtype=np.float64)
 
-        top_idx = triage_result["dominant_original_prediction"]["index"]
+            # 3. Three-Tier Aggregation
+            triage_result = aggregate_triage(
+                probabilities=scores,
+                labels=self.labels,
+                mapping_verified=self.mapping_verified
+            )
+            top_idx = triage_result["dominant_original_prediction"]["index"]
+
+            # Compute Grad-CAM across classifier head only (<2 MB RAM)
+            try:
+                cam_128 = self.compute_gradcam(conv_feat, top_idx)
+            except Exception as cam_err:
+                logger.warning("Grad-CAM generation failed: %s", cam_err)
+                cam_128 = None
+
+            del tensor, conv_feat, preds
+        else:
+            raw_scores = self.model(tensor, training=False).numpy()[0]
+            scores = np.asarray(raw_scores, dtype=np.float64)
+            triage_result = aggregate_triage(
+                probabilities=scores,
+                labels=self.labels,
+                mapping_verified=self.mapping_verified
+            )
+            top_idx = triage_result["dominant_original_prediction"]["index"]
+            del tensor
 
         # 4. Grad-CAM visual attribution
-        cam_128 = self.compute_gradcam(batch_bgr, top_idx)
         orig_b64, overlay_b64 = self.create_overlay_base64(rgb_128, cam_128)
 
         explainability = {
