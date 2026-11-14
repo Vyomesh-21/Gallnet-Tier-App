@@ -6,6 +6,8 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TF_ENABLE_ONEDNN_OPTS=0 \
+    TF_CPP_MIN_LOG_LEVEL=2 \
+    MALLOC_ARENA_MAX=2 \
     PORT=8000 \
     HOME=/home/user \
     KERAS_HOME=/home/user/.cache/keras \
@@ -43,5 +45,5 @@ WORKDIR /app/backend
 # Default port documentation
 EXPOSE 8000
 
-# Launch Uvicorn with dynamic $PORT environment variable support for Render
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Launch Uvicorn with single worker and concurrency limit to strictly remain within container RAM
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --limit-concurrency 5"]

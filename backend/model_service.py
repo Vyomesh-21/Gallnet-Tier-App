@@ -7,6 +7,7 @@ and computes Grad-CAM visual attribution heatmaps.
 
 import os
 import io
+import gc
 import json
 import base64
 import logging
@@ -20,10 +21,13 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("KERAS_HOME", str(CACHE_DIR / "keras"))
 os.environ.setdefault("MPLCONFIGDIR", str(CACHE_DIR / "matplotlib"))
 os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+os.environ.setdefault("MALLOC_ARENA_MAX", "2")
 
 import numpy as np
 from PIL import Image
 import matplotlib
+matplotlib.use("Agg")
 
 try:
     import cv2
@@ -95,6 +99,13 @@ class ModelService:
             import keras
             import tensorflow.keras.backend as K
 
+            # Minimize thread pool memory footprint on cloud containers
+            try:
+                tf.config.threading.set_inter_op_parallelism_threads(1)
+                tf.config.threading.set_intra_op_parallelism_threads(2)
+            except Exception:
+                pass
+
             logger.info("Loading Keras model from %s...", model_path)
             # safe_mode=False is required to deserialize the custom functional architecture containing Lambda layers.
             # We explicitly inspect and secure the Lambda layers immediately after deserialization.
@@ -137,11 +148,13 @@ class ModelService:
                 logger.warning("Grad-CAM initialization warning: %s. Explainability will be unavailable.", grad_exc)
                 self.grad_model = None
 
-            # Test a dry-run inference to ensure model forward-pass is fully functional
-            dummy = np.zeros((1, 128, 128, 3), dtype=np.float32)
-            dry_run = self.model.predict(dummy, verbose=0)
+            # Test a dry-run inference using direct callable (no Keras predict cache overhead)
+            dummy = tf.zeros((1, 128, 128, 3), dtype=tf.float32)
+            dry_run = self.model(dummy, training=False).numpy()[0]
             if dry_run.shape[-1] != 9 or not np.isfinite(dry_run).all():
                 raise RuntimeError(f"Dry-run inference returned invalid outputs: {dry_run}")
+            del dummy, dry_run
+            gc.collect()
             logger.info("Pretrained model dry-run verified successfully.")
 
             self.error = None
@@ -202,28 +215,33 @@ class ModelService:
             tensor = tf.convert_to_tensor(batch_tensor, dtype=tf.float32)
 
             with tf.GradientTape() as tape:
-                conv_outputs, predictions = self.grad_model(tensor)
+                conv_outputs, predictions = self.grad_model(tensor, training=False)
                 loss = predictions[0, target_class_idx]
 
             grads = tape.gradient(loss, conv_outputs)
             if grads is None:
+                del tensor, tape, conv_outputs, predictions
                 return None
 
             pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
             cam = tf.reduce_sum(tf.multiply(pooled_grads, conv_outputs[0]), axis=-1)
-            cam = np.maximum(cam.numpy(), 0.0)
+            cam_np = np.maximum(cam.numpy(), 0.0)
 
-            max_val = np.max(cam)
+            max_val = np.max(cam_np)
             if max_val > 1e-7:
-                cam = cam / max_val
+                cam_np = cam_np / max_val
             else:
-                cam = np.zeros_like(cam)
+                cam_np = np.zeros_like(cam_np)
+
+            del tensor, tape, conv_outputs, predictions, grads, pooled_grads, cam
 
             # Resize 64x64 CAM to 128x128
-            cam_pil = Image.fromarray((cam * 255).astype(np.uint8)).resize(
+            cam_pil = Image.fromarray((cam_np * 255).astype(np.uint8)).resize(
                 (128, 128), Image.Resampling.BILINEAR
             )
-            return np.asarray(cam_pil, dtype=np.float32) / 255.0
+            res = np.asarray(cam_pil, dtype=np.float32) / 255.0
+            del cam_np, cam_pil
+            return res
         except Exception as exc:
             logger.warning("Failed to compute Grad-CAM: %s", exc)
             return None
@@ -263,9 +281,12 @@ class ModelService:
         # 1. Preprocess exactly as in training
         batch_bgr, rgb_128, orig_w, orig_h = self.preprocess_image(image_bytes)
 
-        # 2. REAL model prediction - Never mock
-        raw_scores = self.model.predict(batch_bgr, verbose=0)[0]
+        # 2. REAL model prediction - direct tensor evaluation avoids Keras predict() memory caching
+        import tensorflow as tf
+        tensor = tf.convert_to_tensor(batch_bgr, dtype=tf.float32)
+        raw_scores = self.model(tensor, training=False).numpy()[0]
         scores = np.asarray(raw_scores, dtype=np.float64)
+        del tensor
 
         # 3. Three-Tier Aggregation
         triage_result = aggregate_triage(
@@ -292,6 +313,8 @@ class ModelService:
                 "NOT a validated anatomical perforation localization."
             )
         }
+
+        gc.collect()
 
         return {
             "model_name": MODEL_NAME,
